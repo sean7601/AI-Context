@@ -7,8 +7,9 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     textarea { width: 100%; height: 300px; margin-top: 10px; }
     button { margin-top: 10px; }
-    .checkbox-item { margin-bottom: 5px; }
-    #checkboxContainer { margin-top: 15px; }
+    #checkboxContainer table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    #checkboxContainer th, #checkboxContainer td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    #checkboxContainer th { background-color: #f2f2f2; }
   </style>
 </head>
 <body>
@@ -20,11 +21,11 @@
   <br>
   <button id="processButton">Process Files</button>
   
-  <!-- Container for file checkboxes -->
+  <!-- Container for file table with checkboxes -->
   <div id="checkboxContainer"></div>
   
-  <!-- Button to update output based on selected checkboxes -->
-  <button id="updateButton" style="display:none;">Reproduce Output</button>
+  <!-- Button to generate output based on selected files -->
+  <button id="updateButton" style="display:none;">Produce Output</button>
   
   <h2>Concatenated Output</h2>
   <!-- Copy button added above the final input section -->
@@ -54,36 +55,63 @@
     const output = document.getElementById('output');
     const copyButton = document.getElementById('copyButton');
 
-    // Create checkboxes for each file in the ordered list.
+    // Create a table with checkboxes and file sizes for each file.
     function createCheckboxList(filePaths) {
-      // Clear previous checkboxes, if any.
       checkboxContainer.innerHTML = '';
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      ['Select', 'File', 'Size'].forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
       filePaths.forEach(path => {
-        const div = document.createElement('div');
-        div.className = 'checkbox-item';
+        const file = fileMap[path];
+        const size = file ? file.size : 0;
+        const sizeKB = (size / 1024).toFixed(2) + ' KB';
+        const tr = document.createElement('tr');
+
+        // Checkbox cell
+        const tdCheckbox = document.createElement('td');
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = path;
-        checkbox.checked = true;
-        // Optionally, you might want to keep index.html always selected:
-        // if (path === 'index.html') checkbox.disabled = true;
-        const label = document.createElement('label');
-        label.textContent = ' ' + path;
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        checkboxContainer.appendChild(div);
+        // Automatically deselect any file over 1MB
+        if (size > 1048576) checkbox.checked = false;
+        else checkbox.checked = true;
+        tdCheckbox.appendChild(checkbox);
+        tr.appendChild(tdCheckbox);
+
+        // File name cell
+        const tdName = document.createElement('td');
+        tdName.textContent = path;
+        tr.appendChild(tdName);
+
+        // Size cell
+        const tdSize = document.createElement('td');
+        tdSize.textContent = sizeKB;
+        tr.appendChild(tdSize);
+
+        tbody.appendChild(tr);
       });
+      table.appendChild(tbody);
+      checkboxContainer.appendChild(table);
     }
 
     // Generate concatenated output based on selected checkboxes.
     async function generateOutput() {
-      // Get list of selected file paths.
-      const selectedPaths = Array.from(checkboxContainer.querySelectorAll('input[type="checkbox"]'))
-                                  .filter(checkbox => checkbox.checked)
-                                  .map(checkbox => checkbox.value);
+      const selectedPaths = Array.from(
+        checkboxContainer.querySelectorAll('input[type="checkbox"]')
+      )
+        .filter(checkbox => checkbox.checked)
+        .map(checkbox => checkbox.value);
+
       let concatenatedText = '';
-      
-      // Process each file in order.
       for (const path of selectedPaths) {
         const file = fileMap[path];
         if (file) {
@@ -99,8 +127,10 @@
           concatenatedText += `File: ${path} (Not found in directory)\n\n`;
         }
       }
-      
+
       output.value = concatenatedText;
+      // After first generation, update button text
+      updateButton.textContent = 'Reproduce Output';
     }
 
     // Process the directory: build fileMap, parse index.html, extract referenced files,
@@ -172,15 +202,13 @@
         // Show the update button.
         updateButton.style.display = 'inline-block';
 
-        // Optionally, generate the initial output.
-        await generateOutput();
       } catch (error) {
         console.error("Error processing files:", error);
         alert("An error occurred while processing the files. See console for details.");
       }
     });
 
-    // When the "Reproduce Output" button is clicked, generate output based on selected files.
+    // When the "Produce/Reproduce Output" button is clicked, generate output based on selected files.
     updateButton.addEventListener('click', generateOutput);
 
     // Copy the concatenated output to the clipboard.
