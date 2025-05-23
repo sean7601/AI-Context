@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Filtered File Concatenator with File Selection</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    textarea { width: 100%; height: 300px; margin-top: 10px; }
+    button { margin-top: 10px; }
+    #checkboxContainer table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    #checkboxContainer th, #checkboxContainer td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    #checkboxContainer th { background-color: #f2f2f2; }
+    .selection-controls button { margin-right: 5px; } /* Added for spacing new buttons */
+  </style>
+</head>
+<body>
+  <h1>Filtered File Concatenator</h1>
+  <p>Select a directory containing your app’s files (which must include an <code>index.html</code>). This tool will parse the <code>index.html</code>, extract its local file references, and then let you choose which files to include in the final concatenated output.</p>
+  
+  <!-- Directory selection -->
+  <input type="file" id="directoryInput" webkitdirectory directory multiple>
+  <br>
+  <button id="processButton">Process Files</button>
+  
+  <!-- Container for file table with checkboxes -->
+  <div id="checkboxContainer"></div>
+  
+  <!-- Button to generate output based on selected files -->
+  <button id="updateButton" style="display:none;">Produce Output</button>
+  
+  <h2>Concatenated Output</h2>
+  <!-- Copy button added above the final input section -->
+  <button id="copyButton">Copy to Clipboard</button>
+  
+  <textarea id="output" readonly placeholder="Concatenated file contents will appear here..."></textarea>
+
+  <script>
+    // Global variables
+    let fileMap = {};
+    let filesToIncludePaths = [];
+    let lastCheckedCheckboxIndex = -1; // For shift-click functionality
+
+    // Helper function: reads a File as text and returns a Promise.
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(file);
+      });
+    }
+
+    const directoryInput = document.getElementById('directoryInput');
+    const processButton = document.getElementById('processButton');
+    const updateButton = document.getElementById('updateButton');
+    const checkboxContainer = document.getElementById('checkboxContainer');
+    const output = document.getElementById('output');
+    const copyButton = document.getElementById('copyButton');
+
+    // Handle clicks on checkboxes for shift-selection
+    function handleCheckboxClickInTable(event) {
+        if (event.target.tagName === 'INPUT' && event.target.type === 'checkbox') {
+            const checkboxes = Array.from(checkboxContainer.querySelectorAll('tbody input[type="checkbox"]'));
+            const currentIndex = checkboxes.indexOf(event.target);
+
+            if (event.shiftKey && lastCheckedCheckboxIndex > -1 && lastCheckedCheckboxIndex !== currentIndex) {
+                const start = Math.min(lastCheckedCheckboxIndex, currentIndex);
+                const end = Math.max(lastCheckedCheckboxIndex, currentIndex);
+                const isChecked = event.target.checked; // State of the currently clicked checkbox
+
+                for (let i = start; i <= end; i++) {
+                    checkboxes[i].checked = isChecked;
+                }
+            }
+            lastCheckedCheckboxIndex = currentIndex;
+        }
+    }
+
+    // Create a table with checkboxes and file sizes for each file.
+    function createCheckboxList(filePaths) {
+      checkboxContainer.innerHTML = ''; // Clear previous content
+      lastCheckedCheckboxIndex = -1;    // Reset for new list
+
+      // Add Select All / Deselect All buttons
+      const controlsDiv = document.createElement('div');
+      controlsDiv.className = 'selection-controls';
+      controlsDiv.style.marginBottom = '10px';
+
+      const selectAllButton = document.createElement('button');
+      selectAllButton.textContent = 'Select All';
+      selectAllButton.addEventListener('click', () => {
+        checkboxContainer.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => cb.checked = true);
+        // Optionally, set lastCheckedCheckboxIndex to the last item if the list is not empty
+        const checkboxes = checkboxContainer.querySelectorAll('tbody input[type="checkbox"]');
+        if (checkboxes.length > 0) {
+            lastCheckedCheckboxIndex = checkboxes.length -1;
+        }
+      });
+
+      const deselectAllButton = document.createElement('button');
+      deselectAllButton.textContent = 'Deselect All';
+      deselectAllButton.addEventListener('click', () => {
+        checkboxContainer.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => cb.checked = false);
+         // Optionally, set lastCheckedCheckboxIndex to the last item if the list is not empty
+        const checkboxes = checkboxContainer.querySelectorAll('tbody input[type="checkbox"]');
+        if (checkboxes.length > 0) {
+            lastCheckedCheckboxIndex = checkboxes.length -1; // Or 0, or keep as is. Click will set it.
+        }
+      });
+
+      controlsDiv.appendChild(selectAllButton);
+      controlsDiv.appendChild(deselectAllButton);
+      checkboxContainer.appendChild(controlsDiv);
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      ['Select', 'File', 'Size'].forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      // Attach event listener to tbody for shift-click (event delegation)
+      tbody.addEventListener('click', handleCheckboxClickInTable);
+
+      filePaths.forEach((path, index) => { // Added index for potential use
+        const file = fileMap[path];
+        const size = file ? file.size : 0;
+        const sizeKB = (size / 1024).toFixed(2) + ' KB';
+        const tr = document.createElement('tr');
+
+        // Checkbox cell
+        const tdCheckbox = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = path;
+        checkbox.dataset.index = index; // Store index for easier reference if needed
+        
+        // Automatically deselect any file over 1MB
+        if (size > 1048576) checkbox.checked = false;
+        else checkbox.checked = true;
+        
+        tdCheckbox.appendChild(checkbox);
+        tr.appendChild(tdCheckbox);
+
+        // File name cell
+        const tdName = document.createElement('td');
+        tdName.textContent = path;
+        tr.appendChild(tdName);
+
+        // Size cell
+        const tdSize = document.createElement('td');
+        tdSize.textContent = sizeKB;
+        tr.appendChild(tdSize);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      checkboxContainer.appendChild(table);
+    }
+
+    // Generate concatenated output based on selected checkboxes.
+    async function generateOutput() {
+      const selectedPaths = Array.from(
+        checkboxContainer.querySelectorAll('tbody input[type="checkbox"]') // Target tbody specifically
+      )
+        .filter(checkbox => checkbox.checked)
+        .map(checkbox => checkbox.value);
+
+      let concatenatedText = '';
+      for (const path of selectedPaths) {
+        const file = fileMap[path];
+        if (file) {
+          try {
+            const content = await readFileAsText(file);
+            concatenatedText += `File: ${path}\n`;
+            concatenatedText += '---------------------------------------\n';
+            concatenatedText += content + '\n\n';
+          } catch (err) {
+            concatenatedText += `File: ${path} (Error reading file)\n\n`;
+          }
+        } else {
+          concatenatedText += `File: ${path} (Not found in directory)\n\n`;
+        }
+      }
+
+      output.value = concatenatedText;
+      // After first generation, update button text
+      updateButton.textContent = 'Reproduce Output';
+    }
+
+    // Process the directory
+    processButton.addEventListener('click', async () => {
+      const files = Array.from(directoryInput.files);
+      if (!files.length) {
+        alert('Please select a directory first.');
+        return;
+      }
+
+      const firstFilePath = files[0].webkitRelativePath;
+      const parts = firstFilePath.split('/');
+      let rootFolder = '';
+      if (parts.length > 1) {
+        rootFolder = parts[0] + '/';
+      }
+
+      fileMap = {};
+      files.forEach(file => {
+        let relativePath = file.webkitRelativePath;
+        if (relativePath.startsWith(rootFolder)) {
+          relativePath = relativePath.slice(rootFolder.length);
+        }
+        fileMap[relativePath] = file;
+      });
+
+      const indexFile = fileMap['index.html'];
+      if (!indexFile) {
+        alert('index.html not found in the selected directory.');
+        return;
+      }
+
+      try {
+        const indexContent = await readFileAsText(indexFile);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(indexContent, "text/html");
+        const referencedPaths = [];
+
+        doc.querySelectorAll('script[src]').forEach(script => {
+          const src = script.getAttribute('src');
+          if (src && !src.startsWith('http://') && !src.startsWith('https://')) {
+            referencedPaths.push(src);
+          }
+        });
+
+        doc.querySelectorAll('link[rel="stylesheet"][href]').forEach(link => {
+          const href = link.getAttribute('href');
+          if (href && !href.startsWith('http://') && !href.startsWith('https://')) {
+            referencedPaths.push(href);
+          }
+        });
+
+        const uniqueReferencedPaths = [...new Set(referencedPaths)];
+        filesToIncludePaths = ['index.html', ...uniqueReferencedPaths];
+        createCheckboxList(filesToIncludePaths);
+        updateButton.style.display = 'inline-block';
+
+      } catch (error) {
+        console.error("Error processing files:", error);
+        alert("An error occurred while processing the files. See console for details.");
+      }
+    });
+
+    updateButton.addEventListener('click', generateOutput);
+
+    copyButton.addEventListener('click', () => {
+      navigator.clipboard.writeText(output.value)
+        .then(() => {
+          alert('Copied to clipboard!');
+        })
+        .catch(err => {
+          alert('Failed to copy text: ' + err);
+        });
+    });
+  </script>
+</body>
+</html>
